@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Heebo } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next"
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v16-appRouter";
 import "./globals.css";
 import { SessionProvider } from "next-auth/react";
@@ -77,6 +78,7 @@ export default function RootLayout({
           data-testid="jsonld-store"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(storeJsonLd) }}
         />
+        <Analytics />
         <AppRouterCacheProvider options={{ enableCssLayer: true }}>
           <SessionProvider>
           <ThemeProvider>
