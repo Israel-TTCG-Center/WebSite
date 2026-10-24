@@ -1,0 +1,64 @@
+{
+  "id": null,
+  "uid": "dockside-keep-otel",
+  "title": "Dockside Keep — OpenTelemetry Metrics & Loki Logs",
+  "tags": ["opentelemetry", "prometheus", "loki", "dockside-keep"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "OpenTelemetry Admin Audit Logs Total (Prometheus)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "targets": [
+        {
+          "expr": "dockside_admin_audit_logs_total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "OpenTelemetry HTTP Requests Total (Prometheus)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "targets": [
+        {
+          "expr": "dockside_http_requests_total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Node.js Memory RSS Bytes (Prometheus)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "targets": [
+        {
+          "expr": "dockside_process_memory_rss_bytes",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "OpenTelemetry Structured Application & Audit Logs (Loki)",
+      "type": "logs",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 6 },
+      "datasource": { "type": "loki", "uid": "loki-ds" },
+      "targets": [
+        {
+          "expr": "{service_name=\"dockside-keep-web\"}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

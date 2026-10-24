@@ -1,0 +1,9 @@
+node_modules
+.pnpm-store
+pnpm-lock.yaml
+.next
+.git
+.env.local
+test-results
+playwright-report
+npm-debug.log*

@@ -1,0 +1,118 @@
+services:
+  mongo:
+    image: mongo:9.0.4
+    container_name: docksidekeep-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+
+  loki:
+    image: grafana/loki:3.7
+    container_name: docksidekeep-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    container_name: docksidekeep-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:13.0
+    container_name: docksidekeep-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=dockside-admin-2026
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docksidekeep-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/docksidekeep
+      - JWT_SECRET=docker-docksidekeep-secret-key
+      - OTEL_SERVICE_NAME=dockside-keep-web
+      - LOKI_PUSH_URL=http://loki:3100/loki/api/v1/push
+      - PROMETHEUS_PUBLIC_URL=http://localhost:9090
+      - GRAFANA_PUBLIC_URL=http://localhost:3001
+      - LOKI_PUBLIC_URL=http://localhost:3100
+    depends_on:
+      - mongo
+      - loki
+
+  mongo-test:
+    image: mongo:9.0.4
+    container_name: docksidekeep-mongo-test
+    profiles: ["test"]
+    tmpfs:
+      - /data/db
+
+  web-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docksidekeep-web-test
+    profiles: ["test"]
+    ports:
+      - "3002:3000"
+    environment:
+      - MONGODB_URI=mongodb://mongo-test:27017/docksidekeep_test
+      - JWT_SECRET=docker-docksidekeep-test-secret-key
+      - OTEL_SERVICE_NAME=dockside-keep-web
+    depends_on:
+      - mongo-test
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/items"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.64.1-noble
+    container_name: docksidekeep-playwright
+    profiles: ["test"]
+    working_dir: /app
+    volumes:
+      - .:/app
+      - playwright_node_modules:/app/node_modules
+    environment:
+      - BASE_URL=http://web-test:3000
+      - CI=1
+    depends_on:
+      web-test:
+        condition: service_healthy
+    command: >
+      sh -c "npm install -g pnpm@12.14.0 && pnpm install --no-frozen-lockfile && pnpm run test:e2e"
+
+volumes:
+  mongo_data:
+  loki_data:
+  prometheus_data:
+  grafana_data:
+  playwright_node_modules:
