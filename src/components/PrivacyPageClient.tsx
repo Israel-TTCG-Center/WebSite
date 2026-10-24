@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ShieldCheck, SlidersHorizontal, UserCheck } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { STORE_CONTACT } from "@/lib/i18n";
+import { formatAddressOneLine } from "@/lib/address";
 import { openPrivacyChoicesModal } from "@/components/PrivacyConsentBanner";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -81,7 +82,8 @@ export default function PrivacyPageClient() {
             {t.privacy.accountPrivacyTitle}
           </CardTitle>
           <CardDescription>
-            {STORE_CONTACT.address} • {STORE_CONTACT.email}
+            {formatAddressOneLine(STORE_CONTACT.address, { includePhone: false })} •{" "}
+            {STORE_CONTACT.email}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">

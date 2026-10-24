@@ -2,8 +2,8 @@ import worldCountries from "world-countries";
 import {
   getCountryCallingCode,
   parsePhoneNumber,
-  type Country as IsoCountryAlpha2,
-} from "react-phone-number-input";
+  type CountryCode as IsoCountryAlpha2,
+} from "libphonenumber-js";
 import { type Name, normalizeName } from "@/lib/name";
 
 export type RegexString<Pattern extends string> = string & {

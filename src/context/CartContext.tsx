@@ -312,8 +312,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const addrList: DeliveryAddress[] = rawAddrList.map((a, idx) =>
       normalizeDeliveryAddress(a, {
         billingCountry: defaultCountry,
-        defaultId: a.id || `addr-${idx + 1}`,
-        defaultNickname: a.nickname || "Home",
+        defaultId: a?.id || `addr-${idx + 1}`,
+        defaultNickname: a?.nickname || "Home",
       })
     );
     setSavedAddressesState(addrList);
@@ -325,7 +325,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             billingCountry: defaultCountry,
             defaultId: "billing-default",
             defaultNickname:
-              nextUser.billingAddress.nickname || "Billing (Default Shipping)",
+              nextUser.billingAddress?.nickname || "Billing (Default Shipping)",
           })
         : nextUser.deliveryAddress?.StreetName || (nextUser.deliveryAddress as any)?.street
         ? normalizeAddress(nextUser.deliveryAddress, {
