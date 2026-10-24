@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-import { getDb, getPremiumClassesFromDb } from "@/lib/mongodb";
+import { getDb } from "@/lib/db";
+import { getPremiumClassesFromDb } from "@/lib/store";
 import { normalizeMoney } from "@/lib/money";
 import { formatFullName, normalizeName } from "@/lib/name";
 import {
@@ -87,6 +87,23 @@ export async function POST(request: Request) {
     paymentMethod.type === "bank-transfer" || paymentMethod.type === "cash";
 
   if (db) {
+    // Orders are attributed to the signed-in customer; a registered account's email cannot be
+    // used by an anonymous visitor (it would expose that account's loyalty discount and history).
+    const sessionCustomer = await resolveCustomerUserFromRequest(request, db);
+    if (sessionCustomer) {
+      customer.email = sessionCustomer.email;
+    } else if (
+      customer.email &&
+      (await db
+        .collection("users")
+        .findOne({ email: String(customer.email).trim().toLowerCase() }))
+    ) {
+      return NextResponse.json(
+        { error: "Unauthorized: Sign in to order with a registered account" },
+        { status: 401 }
+      );
+    }
+
     // Check store metadata paymentMethodsConfig before claiming inventory stock
     const metadataDoc = await db
       .collection("metadata")
@@ -358,7 +375,6 @@ export async function POST(request: Request) {
     const result = await db.collection("orders").insertOne(orderDoc);
     if (isBankOrCash && reservedUntilUtc) {
       await db.collection("order_ttl_holds").insertOne({
-        _id: result.insertedId,
         orderId: result.insertedId.toString(),
         customerEmail: customer.email,
         items: cartItems,
@@ -495,14 +511,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ eventSlug, participants });
   }
 
-  if (!email && !adminSession) {
+  // Admins may filter by any email; customers only ever see their own orders.
+  const sessionCustomer = adminSession
+    ? null
+    : await resolveCustomerUserFromRequest(request, db);
+  if (!adminSession && !sessionCustomer) {
     return NextResponse.json(
-      { error: "Unauthorized: Admin session or customer email required" },
+      { error: "Unauthorized: Admin or customer sign-in required" },
       { status: 401 }
     );
   }
+  const scopedEmail = sessionCustomer ? sessionCustomer.email : email;
 
-  const filter = email ? { "customer.email": email } : {};
+  const filter = scopedEmail ? { "customer.email": scopedEmail } : {};
   const docs = await db
     .collection("orders")
     .find(filter)
@@ -547,9 +568,7 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const query = ObjectId.isValid(orderId)
-    ? { _id: new ObjectId(orderId) }
-    : ({ _id: orderId } as any);
+  const query = { _id: String(orderId) };
 
   const existingOrder = await db.collection("orders").findOne(query);
   if (!existingOrder) {
@@ -581,11 +600,7 @@ export async function PATCH(request: Request) {
     }
   } else {
     // Customer action: must be logged-in owner of the order and can only abort BEFORE packaged
-    const customerUser = await resolveCustomerUserFromRequest(
-      request,
-      db,
-      customerEmail
-    );
+    const customerUser = await resolveCustomerUserFromRequest(request, db);
     const orderOwnerEmail = String(
       existingOrder.customer?.email || ""
     ).toLowerCase();
@@ -630,7 +645,7 @@ export async function PATCH(request: Request) {
   });
 
   if (nextStatus !== "ordered-not-paid") {
-    await db.collection("order_ttl_holds").deleteOne(query);
+    await db.collection("order_ttl_holds").deleteOne({ orderId: String(orderId) });
   }
 
   // Restore held inventory in `items` and `events` collections when an active order is cancelled or aborted

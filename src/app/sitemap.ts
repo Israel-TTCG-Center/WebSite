@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { getAllItems, getPaginatedBlogPosts } from "@/lib/mongodb";
+import { getAllItems, getPaginatedBlogPosts } from "@/lib/store";
 import { SITE_URL } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";

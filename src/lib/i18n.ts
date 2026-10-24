@@ -1,4 +1,4 @@
-import type { StoreItem } from "@/lib/mongodb";
+import type { StoreItem } from "@/lib/store";
 import {
   DEFAULT_STORE_ADDRESS,
   DEFAULT_STORE_PHONE,

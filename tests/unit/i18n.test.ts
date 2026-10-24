@@ -8,7 +8,7 @@ import {
   getLocalizedBadge,
 } from "@/lib/i18n";
 import { formatMoney, normalizeMoney } from "@/lib/money";
-import { INITIAL_ITEMS } from "@/lib/mongodb";
+import { INITIAL_ITEMS } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 describe("i18n Hebrew & English Dictionary Parity & Clean Copy", () => {

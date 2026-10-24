@@ -1,4 +1,4 @@
-import type { Db } from "mongodb";
+import type { Db } from "@/lib/db";
 import {
   type CountryCodeAlpha3,
   countryAlpha3ToAlpha2,
@@ -284,7 +284,7 @@ export async function lookupAddressOrZipViaGeoapify(
   const executeLookup = async (): Promise<GeocodeLookupResponse> => {
     const db = options?.db ?? null;
 
-    // 3. Check Tier 2: MongoDB `geocode_cache` (7-day TTL)
+    // 3. Check Tier 2: Postgres `geocode_cache` (7-day TTL)
     if (db) {
       try {
         const dbDoc = await db.collection("geocode_cache").findOne({
@@ -511,7 +511,7 @@ export async function lookupAddressOrZipViaGeoapify(
       }
     }
 
-    // 7. Save in Tier 1 (Memory) and Tier 2 (MongoDB `geocode_cache` with 7-day TTL)
+    // 7. Save in Tier 1 (Memory) and Tier 2 (Postgres `geocode_cache` with 7-day TTL)
     const expiresAtMs = nowMs + GEOCODE_CACHE_TTL_MS;
     memoryGeocodeCache.set(cacheKey, {
       result: resolvedResult,

@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+
+let mockSession: any = null;
+vi.mock("@/auth", () => ({ auth: async () => mockSession }));
 import {
   buildAdminSession,
-  createAdminToken,
   createFrozenAuditRow,
   deepFreeze,
-  getAdminSessionFromToken,
   hasAdminPrivilege,
   normalizeAdminRole,
   resolveAdminSessionFromRequest,
@@ -14,11 +15,13 @@ import {
 import {
   hashPasswordScrypt,
   isScryptHash,
-  verifyAuth0AdminIdentity,
   verifyPasswordScrypt,
-  verifyThirdPartyIdentity,
 } from "@/lib/auth-security";
 import { translations } from "@/lib/i18n";
+
+beforeEach(() => {
+  mockSession = null;
+});
 
 describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC & Auth0 Security", () => {
   it("never trusts ?admin=1 in the request URL and verifies the logged-in admin entity against the DB", async () => {
@@ -31,15 +34,22 @@ describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC &
     );
     expect(resolvedSpoof).toBeNull();
 
-    // Valid token with in-memory mock DB containing the admin entity
-    const ownerSession = buildAdminSession({
-      username: "admin",
-      role: "owner",
+    // A forged header token is ignored: identity only comes from the Auth.js session
+    const forgedReq = new Request("http://localhost:3000/api/items", {
+      headers: {
+        "x-admin-token": "dockside-keep-admin-session-token",
+        authorization: "Bearer dockside-keep-admin-session-token",
+      },
     });
-    const validToken = createAdminToken(ownerSession);
-    const authedReq = new Request("http://localhost:3000/api/items", {
-      headers: { "x-admin-token": validToken },
-    });
+    expect(await resolveAdminSessionFromRequest(forgedReq, null)).toBeNull();
+
+    // A customer session is never an admin session
+    mockSession = { user: { kind: "customer", email: "alex@docksidekeep.org" } };
+    expect(await resolveAdminSessionFromRequest(forgedReq, null)).toBeNull();
+
+    // Valid admin session with in-memory mock DB containing the admin entity
+    mockSession = { user: { kind: "admin", username: "admin" } };
+    const authedReq = new Request("http://localhost:3000/api/items");
 
     const mockDbWithAdmin = {
       collection: (name: string) => ({
@@ -70,23 +80,16 @@ describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC &
     expect(resolvedValid?.username).toBe("admin");
     expect(resolvedValid?.role).toBe("owner");
 
-    // Token for a deleted/revoked admin account is rejected when checked against the DB
-    const revokedSession = buildAdminSession({
-      username: "revoked_staff",
-      role: "support",
-    });
-    const revokedToken = createAdminToken(revokedSession);
-    const revokedReq = new Request("http://localhost:3000/api/items", {
-      headers: { Authorization: `Bearer ${revokedToken}` },
-    });
+    // Session of a deleted/revoked admin account is rejected when checked against the DB
+    mockSession = { user: { kind: "admin", username: "revoked_staff" } };
     const resolvedRevoked = await resolveAdminSessionFromRequest(
-      revokedReq,
+      authedReq,
       mockDbWithAdmin
     );
     expect(resolvedRevoked).toBeNull();
   });
 
-  it("verifies logged-in customer entities from x-user-email and the users collection", async () => {
+  it("verifies logged-in customer entities from the Auth.js session and the users collection", async () => {
     const mockDbWithUsers = {
       collection: (name: string) => ({
         findOne: async (query: Record<string, unknown>) => {
@@ -101,11 +104,17 @@ describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC &
       }),
     } as any;
 
-    const reqWithHeader = new Request("http://localhost:3000/api/orders", {
+    // x-user-email is never trusted
+    const spoofedReq = new Request("http://localhost:3000/api/orders", {
       headers: { "x-user-email": "alex@docksidekeep.org" },
     });
+    expect(
+      await resolveCustomerUserFromRequest(spoofedReq, mockDbWithUsers)
+    ).toBeNull();
+
+    mockSession = { user: { kind: "customer", email: "Alex@Docksidekeep.org" } };
     const customer = await resolveCustomerUserFromRequest(
-      reqWithHeader,
+      spoofedReq,
       mockDbWithUsers
     );
     expect(customer).toEqual({
@@ -113,6 +122,12 @@ describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC &
       name: "Alex Mercer",
     });
 
+    // An admin session is not a customer session
+    mockSession = { user: { kind: "admin", username: "admin" } };
+    expect(
+      await resolveCustomerUserFromRequest(spoofedReq, mockDbWithUsers)
+    ).toBeNull();
+    mockSession = null;
     const unauthedReq = new Request("http://localhost:3000/api/orders");
     const unauthedCustomer = await resolveCustomerUserFromRequest(
       unauthedReq,
@@ -147,11 +162,6 @@ describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC &
     expect(hasAdminPrivilege(supportSession, "events")).toBe(true);
     expect(hasAdminPrivilege(supportSession, "manage_admins")).toBe(false);
     expect(hasAdminPrivilege(supportSession, "metadata")).toBe(false);
-
-    const token = createAdminToken(supportSession);
-    const decoded = getAdminSessionFromToken(token);
-    expect(decoded?.username).toBe("event_staff");
-    expect(decoded?.role).toBe("support");
   });
 
   it("deeply freezes audit log rows and redacts raw passwords and password hashes", () => {
@@ -184,7 +194,7 @@ describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC &
     ).toBe(true);
   });
 
-  it("verifies Auth0 delegation, salted scrypt password hashing, and one-click Google sign-in", () => {
+  it("verifies salted scrypt password hashing and audit redaction", () => {
     expect(translations.en.auth.createAccount).toBe("Create Your Account");
     expect(translations.en.auth.registerTab).toBe("Create Account");
 
@@ -202,25 +212,5 @@ describe("Logged-In Entity Verification (Never Trust URL ?admin=1), Admin RBAC &
     }) as Record<string, unknown>;
     expect(sanitized.password).toBe("[REDACTED]");
     expect(sanitized.passwordHash).toBe("[REDACTED]");
-
-    const googleId = verifyThirdPartyIdentity({ provider: "google" });
-    expect(googleId.authStrategy).toBe("auth0-oauth");
-    expect(googleId.email).toBe("google.player@docksidekeep.org");
-    expect(googleId.emailVerified).toBe(true);
-
-    const adminSso = verifyAuth0AdminIdentity({
-      username: "admin",
-      auth0Token: "auth0-admin-sso-session",
-    });
-    expect(adminSso.verified).toBe(true);
-    expect(adminSso.authProvider).toBe("auth0");
-    expect(adminSso.auth0Sub).toBe("auth0|admin|admin");
-
-    const adminVerifierCheck = verifyAuth0AdminIdentity({
-      username: "event_staff",
-      password: plain,
-      storedVerifier: hashed,
-    });
-    expect(adminVerifierCheck.verified).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Heebo } from "next/font/google";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v16-appRouter";
 import "./globals.css";
+import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { CartProvider } from "@/context/CartContext";
@@ -77,6 +78,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(storeJsonLd) }}
         />
         <AppRouterCacheProvider options={{ enableCssLayer: true }}>
+          <SessionProvider>
           <ThemeProvider>
             <LanguageProvider>
               <CartProvider>
@@ -94,6 +96,7 @@ export default function RootLayout({
               </CartProvider>
             </LanguageProvider>
           </ThemeProvider>
+          </SessionProvider>
         </AppRouterCacheProvider>
       </body>
     </html>

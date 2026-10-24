@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { handleOrderTtlDeletionEvent } from "@/lib/mongodb";
+import { handleOrderTtlDeletionEvent } from "@/lib/store";
 import {
   ALL_PAYMENT_METHOD_TYPES,
   calculateLoyaltyStatus,
@@ -171,7 +171,7 @@ describe("Orders Lifecycle (In cart -> ordered (not paid) -> ordered (paid) -> p
     expect(statusAffiliate.discountPercent).toBe(20);
   });
 
-  it("captures MongoDB TTL deletion events to cancel expired 3-day unpaid orders and restore stock while preserving order history", async () => {
+  it("handles expired-hold TTL events to cancel expired 3-day unpaid orders and restore stock while preserving order history", async () => {
     const ordersStore: Record<string, any> = {
       "ord-unpaid-1": {
         _id: "ord-unpaid-1",

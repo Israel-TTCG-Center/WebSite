@@ -2,6 +2,7 @@
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { signIn, signOut, useSession } from "next-auth/react";
 import { useForm, useWatch } from "react-hook-form";
 import {
   ShieldAlert,
@@ -29,7 +30,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { Facebook } from "@/components/ui/brand-icons";
-import type { StoreItem } from "@/lib/mongodb";
+import type { StoreItem } from "@/lib/store";
 import { formatMoney, type Money } from "@/lib/money";
 import {
   canStoreCancelOrder,
@@ -97,7 +98,10 @@ function AdminPortalContent() {
   const pageParam = searchParams.get("page") as AdminPageTab | null;
 
   const [activePage, setActivePage] = useState<AdminPageTab>("inventory");
-  const [adminToken, setAdminToken] = useState<string | null>(null);
+  // Admin identity comes from the Auth.js session cookie (sent automatically with every request).
+  // `adminToken` is only a truthy marker that an admin session exists.
+  const { data: authSession } = useSession();
+  const adminToken = authSession?.user?.kind === "admin" ? "session" : null;
   const adminLoginForm = useForm<{ username: string; password: string }>({
     defaultValues: { username: "", password: "" },
   });
@@ -252,22 +256,12 @@ function AdminPortalContent() {
     }
   }, [pageParam]);
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem("dockside-admin-token");
-    if (saved) {
-      setAdminToken(saved);
-    }
-  }, []);
-
   const switchPage = (tab: AdminPageTab) => {
     setActivePage(tab);
     router.replace(`/admin?page=${tab}`);
   };
 
   const loadDashboardData = async () => {
-    const authHeaders: Record<string, string> = adminToken
-      ? { "x-admin-token": adminToken }
-      : {};
     const [
       itemsRes,
       eventsRes,
@@ -278,14 +272,14 @@ function AdminPortalContent() {
       adminRes,
       otelRes,
     ] = await Promise.all([
-      fetch("/api/items", { headers: authHeaders }),
-      fetch("/api/events", { headers: authHeaders }),
-      fetch("/api/orders", { headers: authHeaders }),
+      fetch("/api/items"),
+      fetch("/api/events"),
+      fetch("/api/orders"),
       fetch("/api/metadata"),
-      fetch("/api/premium", { headers: authHeaders }),
+      fetch("/api/premium"),
       fetch("/api/blog"),
       adminToken
-        ? fetch("/api/admin", { headers: authHeaders })
+        ? fetch("/api/admin")
         : Promise.resolve(null),
       fetch("/api/telemetry"),
     ]);
@@ -372,48 +366,15 @@ function AdminPortalContent() {
 
   const handleAdminLogin = adminLoginForm.handleSubmit(async (values) => {
     setLoginError(null);
-    const res = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: values.username,
-        password: values.password,
-      }),
+    const result = await signIn("admin", {
+      username: values.username,
+      password: values.password,
+      redirect: false,
     });
-    const data = await res.json();
-    if (!res.ok) {
-      setLoginError(data.error || "Invalid admin credentials");
-      return;
+    if (!result || result.error) {
+      setLoginError("Invalid admin credentials");
     }
-    sessionStorage.setItem("dockside-admin-token", data.adminToken);
-    if (data.admin) {
-      setCurrentAdmin(data.admin);
-    }
-    setAdminToken(data.adminToken);
   });
-
-  const handleAdminAuth0Sso = async () => {
-    setLoginError(null);
-    const res = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "auth0-sso",
-        username: username.trim() || "admin",
-        auth0Token: "auth0-admin-sso-session",
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setLoginError(data.error || "Auth0 admin authentication failed");
-      return;
-    }
-    sessionStorage.setItem("dockside-admin-token", data.adminToken);
-    if (data.admin) {
-      setCurrentAdmin(data.admin);
-    }
-    setAdminToken(data.adminToken);
-  };
 
   const handleImageFileUpload = (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -449,7 +410,6 @@ function AdminPortalContent() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({ csvText }),
     });
@@ -464,9 +424,6 @@ function AdminPortalContent() {
   const handleDownloadEventParticipants = async (slug: string) => {
     const res = await fetch(
       `/api/orders?eventSlug=${encodeURIComponent(slug)}&format=csv`,
-      {
-        headers: adminToken ? { "x-admin-token": adminToken } : {},
-      }
     );
     if (!res.ok) return;
     const csvContent = await res.text();
@@ -495,7 +452,6 @@ function AdminPortalContent() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug: newSlug,
@@ -556,7 +512,6 @@ function AdminPortalContent() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug: evSlug,
@@ -621,7 +576,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug,
@@ -661,7 +615,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug: item.slug,
@@ -694,7 +647,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug: item.slug,
@@ -715,7 +667,6 @@ function AdminPortalContent() {
     const endpoint = isEvent ? "/api/events" : "/api/items";
     await fetch(`${endpoint}?slug=${encodeURIComponent(slug)}`, {
       method: "DELETE",
-      headers: { "x-admin-token": adminToken },
     });
     await loadDashboardData();
   };
@@ -728,7 +679,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug,
@@ -744,7 +694,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug: item.slug,
@@ -765,7 +714,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         slug: item.slug,
@@ -781,7 +729,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({ orderId, status }),
     });
@@ -857,7 +804,6 @@ function AdminPortalContent() {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         phone: metaPhone,
@@ -883,7 +829,6 @@ function AdminPortalContent() {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         phone: metaPhone,
@@ -909,7 +854,6 @@ function AdminPortalContent() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         id: clsId,
@@ -932,7 +876,6 @@ function AdminPortalContent() {
     if (!adminToken) return;
     await fetch(`/api/premium?id=${encodeURIComponent(id)}`, {
       method: "DELETE",
-      headers: { "x-admin-token": adminToken },
     });
     await loadDashboardData();
   };
@@ -943,7 +886,6 @@ function AdminPortalContent() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": adminToken,
       },
       body: JSON.stringify({
         email: assignEmail,
@@ -990,18 +932,6 @@ function AdminPortalContent() {
                 {loginError}
               </div>
             )}
-            <div className="mb-4">
-              <Button
-                type="button"
-                variant="outline"
-                data-testid="admin-auth0-sso-btn"
-                onClick={handleAdminAuth0Sso}
-                className="w-full font-bold"
-              >
-                <Lock className="w-4 h-4 text-amber-500" />
-                <span>Sign In with Auth0 (SSO)</span>
-              </Button>
-            </div>
             <form onSubmit={handleAdminLogin} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold mb-1">
@@ -1110,8 +1040,8 @@ function AdminPortalContent() {
             variant="ghost"
             size="sm"
             onClick={() => {
-              sessionStorage.removeItem("dockside-admin-token");
-              setAdminToken(null);
+              setCurrentAdmin(null);
+              void signOut({ redirect: false });
             }}
           >
             <LogOut className="w-4 h-4" />
@@ -1130,7 +1060,7 @@ function AdminPortalContent() {
             <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
             <span>
               Backward-Compatibility Alert: {itemsWithMissingFields.length}{" "}
-              record(s) in MongoDB have missing fields that should be updated
+              record(s) in the database have missing fields that should be updated
             </span>
           </div>
           <ul className="text-xs space-y-1 ps-6 list-disc">
@@ -2998,7 +2928,6 @@ function AdminPortalContent() {
                     method: "POST",
                     headers: {
                       "Content-Type": "application/json",
-                      "x-admin-token": adminToken,
                     },
                     body: JSON.stringify({
                       slug: blogSlug.trim(),
@@ -3136,7 +3065,6 @@ function AdminPortalContent() {
                           `/api/blog?slug=${encodeURIComponent(post.slug)}`,
                           {
                             method: "DELETE",
-                            headers: { "x-admin-token": adminToken },
                           }
                         );
                         if (res.ok) {
@@ -3204,7 +3132,6 @@ function AdminPortalContent() {
                       method: "PUT",
                       headers: {
                         "Content-Type": "application/json",
-                        "x-admin-token": adminToken,
                       },
                       body: JSON.stringify({
                         username: subAdminUsername.trim(),
@@ -3395,7 +3322,6 @@ function AdminPortalContent() {
                               )}`,
                               {
                                 method: "DELETE",
-                                headers: { "x-admin-token": adminToken },
                               }
                             );
                             if (res.ok) {

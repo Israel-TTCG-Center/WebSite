@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
+import { getDb } from "@/lib/db";
 import { normalizeCountryCodeAlpha3 } from "@/lib/address";
 import {
   DEFAULT_SUPPORTED_COUNTRIES,

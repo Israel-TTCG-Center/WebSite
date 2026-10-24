@@ -263,7 +263,7 @@ describe("SEO Metadata, Schema.org JSON-LD, OpenTelemetry & Accessibility Static
       "src/context/ThemeContext.tsx",
       "src/context/LanguageContext.tsx",
       "src/context/CartContext.tsx",
-      "src/lib/mongodb.ts",
+      "src/lib/store.ts",
     ]) {
       expect(readSrc(rel).toLowerCase()).not.toContain(forbidden);
     }

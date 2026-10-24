@@ -1,4 +1,5 @@
-import type { Db } from "mongodb";
+import type { Db } from "@/lib/db";
+import { auth } from "@/auth";
 import { nowUtcIso } from "./premium";
 import {
   emitOtelLog,
@@ -6,9 +7,6 @@ import {
   recordFeatureUsage,
   recordOtelTraceSpan,
 } from "./otel";
-
-export const ADMIN_TOKEN =
-  process.env.JWT_SECRET || "dockside-keep-admin-session-token";
 
 export type AdminRole = "owner" | "manager" | "editor" | "support";
 
@@ -98,76 +96,28 @@ export function buildAdminSession(doc: {
   };
 }
 
-export function createAdminToken(session: AdminSession): string {
-  const payload = Buffer.from(JSON.stringify(session), "utf8").toString(
-    "base64url"
-  );
-  return `${ADMIN_TOKEN}.${payload}`;
-}
-
-export function getAdminSessionFromToken(
-  token?: string | null
-): AdminSession | null {
-  if (!token) return null;
-  if (token === ADMIN_TOKEN) {
-    return buildAdminSession({
-      username: process.env.ADMIN_USERNAME || "admin",
-      role: "owner",
-    });
-  }
-  if (token.startsWith(`${ADMIN_TOKEN}.`)) {
-    const encoded = token.slice(ADMIN_TOKEN.length + 1);
-    try {
-      const decoded = JSON.parse(
-        Buffer.from(encoded, "base64url").toString("utf8")
-      );
-      if (decoded && typeof decoded.username === "string") {
-        return buildAdminSession(decoded);
-      }
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-export function getAdminSessionFromRequest(
-  request: Request
-): AdminSession | null {
-  const headerToken = request.headers.get("x-admin-token");
-  const authHeader = request.headers.get("authorization");
-  const bearerToken =
-    authHeader && authHeader.toLowerCase().startsWith("bearer ")
-      ? authHeader.slice(7).trim()
-      : null;
-  return getAdminSessionFromToken(headerToken || bearerToken);
-}
-
 /**
- * Resolves and verifies the logged-in admin entity from the request headers
- * (`x-admin-token` or `Authorization: Bearer <token>`) and, when a database
- * connection is available, cross-checks the `admins` collection so deleted
- * accounts are rejected and role/privilege updates take effect immediately.
- * Never trusts URL query parameters (such as `?admin=1`).
+ * Resolves the signed-in admin from the Auth.js session cookie and, when a database
+ * connection is available, cross-checks the `admins` table so deleted accounts are
+ * rejected and role/privilege updates take effect immediately.
+ * Never trusts request headers or URL query parameters (such as `?admin=1`).
+ * The `request` argument is kept for call-site compatibility; the session comes from cookies.
  */
 export async function resolveAdminSessionFromRequest(
-  request: Request,
+  _request?: Request,
   db?: Db | null
 ): Promise<AdminSession | null> {
-  const tokenSession = getAdminSessionFromRequest(request);
-  if (!tokenSession) return null;
-  if (!db) return tokenSession;
+  const session = await auth();
+  const user = session?.user;
+  if (!user || user.kind !== "admin" || !user.username) return null;
+  const username = user.username;
+  if (!db) return buildAdminSession({ username });
 
   const rootUsername = process.env.ADMIN_USERNAME || "admin";
-  const adminDoc = await db
-    .collection("admins")
-    .findOne({ username: tokenSession.username });
+  const adminDoc = await db.collection("admins").findOne({ username });
   if (!adminDoc) {
-    if (tokenSession.username === rootUsername) {
-      return buildAdminSession({
-        username: rootUsername,
-        role: "owner",
-      });
+    if (username === rootUsername) {
+      return buildAdminSession({ username: rootUsername, role: "owner" });
     }
     return null;
   }
@@ -180,35 +130,29 @@ export async function resolveAdminSessionFromRequest(
 }
 
 /**
- * Resolves the logged-in customer entity from `x-user-email` header (or body email)
- * and verifies that the user exists in the `users` collection when `db` is connected.
+ * Resolves the signed-in customer from the Auth.js session cookie and verifies the
+ * account exists in the `users` table. The email always comes from the verified session,
+ * never from a header or request body.
  */
 export async function resolveCustomerUserFromRequest(
-  request: Request,
-  db?: Db | null,
-  fallbackEmail?: string | null
+  _request?: Request,
+  db?: Db | null
 ): Promise<{ email: string; name: string } | null> {
-  const rawEmail =
-    request.headers.get("x-user-email") || fallbackEmail || "";
-  const email = String(rawEmail).trim().toLowerCase();
-  if (!email) return null;
+  const session = await auth();
+  const user = session?.user;
+  if (!user || user.kind !== "customer" || !user.email) return null;
+  const email = user.email.trim().toLowerCase();
 
   if (db) {
-    const userDoc =
-      (await db.collection("users").findOne({ email })) ||
-      (await db.collection("users").findOne({ email: rawEmail.trim() }));
-    if (userDoc) {
-      return {
-        email: String(userDoc.email || email),
-        name: String(userDoc.name || email.split("@")[0]),
-      };
-    }
+    const userDoc = await db.collection("users").findOne({ email });
+    if (!userDoc) return null;
+    return {
+      email: String(userDoc.email || email),
+      name: String(userDoc.name || email.split("@")[0]),
+    };
   }
 
-  return {
-    email,
-    name: email.split("@")[0] || "Customer",
-  };
+  return { email, name: email.split("@")[0] || "Customer" };
 }
 
 export function hasAdminPrivilege(
@@ -219,14 +163,6 @@ export function hasAdminPrivilege(
   if (session.role === "owner") return true;
   if (!requiredPrivilege) return true;
   return session.privileges.includes(requiredPrivilege);
-}
-
-export function verifyAdminToken(
-  request: Request,
-  requiredPrivilege?: AdminPrivilege
-): boolean {
-  const session = getAdminSessionFromRequest(request);
-  return hasAdminPrivilege(session, requiredPrivilege);
 }
 
 // ============================================================================
@@ -362,7 +298,7 @@ export async function recordAdminAuditLog(
   memoryAuditLogs.unshift(frozenRow);
 
   if (db) {
-    // Store an immutable copy in MongoDB admin_audit_logs collection
+    // Store an immutable copy in the admin_audit_logs table
     await db.collection("admin_audit_logs").insertOne({
       id: frozenRow.id,
       createdAtUtc: frozenRow.createdAtUtc,

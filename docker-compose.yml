@@ -1,12 +1,17 @@
 services:
-  mongo:
-    image: mongo:9.0.4
-    container_name: docksidekeep-mongo
+  # Local stand-in for Supabase Postgres (production uses the Supabase DATABASE_URL).
+  db:
+    image: postgres:17
+    container_name: docksidekeep-db
     restart: unless-stopped
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=docksidekeep
     volumes:
-      - mongo_data:/data/db
+      - pg_data:/var/lib/postgresql/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d:ro
     ports:
-      - "27017:27017"
+      - "54322:5432"
 
   loki:
     image: grafana/loki:3.7
@@ -55,23 +60,30 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/docksidekeep
-      - JWT_SECRET=docker-docksidekeep-secret-key
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/docksidekeep
+      - AUTH_SECRET=docker-docksidekeep-secret-key-change-me
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=dockside-admin-2026
       - OTEL_SERVICE_NAME=dockside-keep-web
       - LOKI_PUSH_URL=http://loki:3100/loki/api/v1/push
       - PROMETHEUS_PUBLIC_URL=http://localhost:9090
       - GRAFANA_PUBLIC_URL=http://localhost:3001
       - LOKI_PUBLIC_URL=http://localhost:3100
     depends_on:
-      - mongo
+      - db
       - loki
 
-  mongo-test:
-    image: mongo:9.0.4
-    container_name: docksidekeep-mongo-test
+  db-test:
+    image: postgres:17
+    container_name: docksidekeep-db-test
     profiles: ["test"]
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=docksidekeep_test
+    volumes:
+      - ./supabase/migrations:/docker-entrypoint-initdb.d:ro
     tmpfs:
-      - /data/db
+      - /var/lib/postgresql/data
 
   web-test:
     build:
@@ -82,11 +94,13 @@ services:
     ports:
       - "3002:3000"
     environment:
-      - MONGODB_URI=mongodb://mongo-test:27017/docksidekeep_test
-      - JWT_SECRET=docker-docksidekeep-test-secret-key
+      - DATABASE_URL=postgres://postgres:postgres@db-test:5432/docksidekeep_test
+      - AUTH_SECRET=docker-docksidekeep-test-secret-key
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=dockside-admin-2026
       - OTEL_SERVICE_NAME=dockside-keep-web
     depends_on:
-      - mongo-test
+      - db-test
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/items"]
       interval: 3s
@@ -111,7 +125,7 @@ services:
       sh -c "npm install -g pnpm@12.14.0 && pnpm install --no-frozen-lockfile && pnpm run test:e2e"
 
 volumes:
-  mongo_data:
+  pg_data:
   loki_data:
   prometheus_data:
   grafana_data:

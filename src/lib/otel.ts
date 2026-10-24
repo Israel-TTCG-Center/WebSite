@@ -1,5 +1,5 @@
 import { trace, metrics, SpanStatusCode } from "@opentelemetry/api";
-import type { Db } from "mongodb";
+import type { Db } from "@/lib/db";
 import { nowUtcIso } from "./premium";
 
 export const OTEL_SERVICE_NAME =
@@ -42,7 +42,7 @@ const otelCounters = {
     "dockside_order_ttl_deletions_total",
     {
       description:
-        "Total 3-day unpaid order TTL deletion events captured via MongoDB Change Streams",
+        "Total 3-day unpaid order TTL deletion events captured by the expired-hold sweep",
     }
   ),
   dockside_privacy_erasures_total: meter.createCounter(
@@ -170,7 +170,7 @@ async function pushToSelfHostedLoki(record: OtelLogRecord): Promise<void> {
       signal: AbortSignal.timeout(1500),
     });
   } catch {
-    // Non-blocking: if Loki container is still starting up, MongoDB & memory retain all logs
+    // Non-blocking: if Loki container is still starting up, Postgres & memory retain all logs
   }
 }
 
@@ -556,7 +556,7 @@ export function formatOtelPrometheus(snapshot: OtelSnapshot): string {
     "# TYPE dockside_errors_total counter",
     `dockside_errors_total{service_name="${svc}"} ${snapshot.counters.dockside_errors_total}`,
     "",
-    "# HELP dockside_order_ttl_deletions_total Total 3-day unpaid order TTL deletion events captured via MongoDB Change Streams",
+    "# HELP dockside_order_ttl_deletions_total Total 3-day unpaid order TTL deletion events captured by the expired-hold sweep",
     "# TYPE dockside_order_ttl_deletions_total counter",
     `dockside_order_ttl_deletions_total{service_name="${svc}"} ${snapshot.counters.dockside_order_ttl_deletions_total}`,
     "",

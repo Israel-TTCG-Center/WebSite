@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { useForm } from "react-hook-form";
 import { User, Lock, Mail, ArrowRight, Globe } from "lucide-react";
 import { useCart } from "@/context/CartContext";
@@ -48,41 +49,62 @@ export default function LoginPage() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
 
+  const loadProfileAndContinue = async () => {
+    const res = await fetch("/api/auth");
+    const data = res.ok ? await res.json() : null;
+    if (!data?.user) {
+      setError("Authentication failed");
+      return;
+    }
+    setUser(data.user);
+    if (data.user.preferences?.locale) {
+      setLocale(data.user.preferences.locale);
+    }
+    if (data.user.preferences?.theme) {
+      setTheme(data.user.preferences.theme);
+    }
+    router.push("/account");
+  };
+
   const onSubmit = async (values: AuthFormValues) => {
     setError(null);
     setLoading(true);
 
     try {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          name: normalizeName(
-            values.name,
-            values.email.split("@")[0] || "Guest",
-            "Player"
-          ),
-          email: values.email,
-          password: values.password,
-          deliveryAddress,
-          paymentMethod,
-          preferences: { locale, theme },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Authentication failed");
-      } else {
-        setUser(data.user);
-        if (data.user?.preferences?.locale) {
-          setLocale(data.user.preferences.locale);
+      if (mode === "register") {
+        const res = await fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: normalizeName(
+              values.name,
+              values.email.split("@")[0] || "Guest",
+              "Player"
+            ),
+            email: values.email,
+            password: values.password,
+            deliveryAddress,
+            paymentMethod,
+            preferences: { locale, theme },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Authentication failed");
+          return;
         }
-        if (data.user?.preferences?.theme) {
-          setTheme(data.user.preferences.theme);
-        }
-        router.push("/account");
       }
+
+      const result = await signIn("customer", {
+        email: values.email,
+        password: values.password,
+        redirect: false,
+      });
+      if (!result || result.error) {
+        setError("Invalid email or password");
+        return;
+      }
+      await loadProfileAndContinue();
     } catch {
       setError("Network error while connecting to server.");
     } finally {
@@ -94,28 +116,10 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      // One-click Google Sign-In via Auth0: uses the Google account email directly without requiring email input
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "third-party",
-          provider: "google",
-          deliveryAddress,
-          paymentMethod,
-          preferences: { locale, theme },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Third-party authentication failed");
-      } else {
-        setUser(data.user);
-        router.push("/account");
-      }
+      // Redirects to Google; the account email is the verified Google email
+      await signIn("google", { callbackUrl: "/account" });
     } catch {
       setError("Network error while connecting to Google provider.");
-    } finally {
       setLoading(false);
     }
   };

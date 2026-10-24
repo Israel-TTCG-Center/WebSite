@@ -1,3 +1,4 @@
+import { signInWithCredentials } from "./auth-helpers";
 import { test, expect } from "@playwright/test";
 
 test.describe("02. Customer Storefront, Events, Contact, Blog & SEO Verification", () => {
@@ -79,16 +80,17 @@ test.describe("02. Customer Storefront, Events, Contact, Blog & SEO Verification
     expect(unauthorizedBlogRes.status()).toBe(401);
 
     // Sub-admin RBAC verification
-    const subLoginRes = await request.post("/api/admin", {
-      data: { username: "event_staff", password: "staff-pass-2026" },
-    });
-    expect(subLoginRes.ok()).toBe(true);
-    const subLoginData = await subLoginRes.json();
-    expect(subLoginData.admin.role).toBe("support");
-    expect(subLoginData.admin.level).toBe(30);
+    expect(
+      await signInWithCredentials(request, "admin", {
+        username: "event_staff",
+        password: "staff-pass-2026",
+      })
+    ).toBe(true);
+    const subSession = await (await request.get("/api/admin")).json();
+    expect(subSession.currentAdmin.role).toBe("support");
+    expect(subSession.currentAdmin.level).toBe(30);
 
     const subTryCreateAdmin = await request.put("/api/admin", {
-      headers: { "x-admin-token": subLoginData.adminToken },
       data: { username: "rogue_admin", password: "123", role: "manager" },
     });
     expect(subTryCreateAdmin.status()).toBe(403);

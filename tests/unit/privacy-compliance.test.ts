@@ -14,8 +14,11 @@ const mockLoyalty: Record<string, any> = {};
 const mockConsents: Record<string, any> = {};
 const mockItems: Record<string, any> = {};
 
-vi.mock("@/lib/mongodb", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/mongodb")>();
+let mockSession: any = null;
+vi.mock("@/auth", () => ({ auth: async () => mockSession }));
+
+vi.mock("@/lib/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db")>();
   return {
     ...actual,
     getDb: async () => ({
@@ -260,6 +263,16 @@ describe("GDPR (EU/UK), California (CCPA/CPRA) & Israeli (PPL Amendment 13 & Ant
     // 1. Unauthenticated GET /api/privacy is rejected with 401
     const unauthGet = await GET(new Request("http://localhost:3000/api/privacy"));
     expect(unauthGet.status).toBe(401);
+
+    // A spoofed x-user-email header alone is never accepted
+    const spoofGet = await GET(
+      new Request("http://localhost:3000/api/privacy", {
+        headers: { "x-user-email": "maya@example.com" },
+      })
+    );
+    expect(spoofGet.status).toBe(401);
+
+    mockSession = { user: { kind: "customer", email: "maya@example.com" } };
 
     // 2. Authenticated POST /api/privacy with Sec-GPC: 1 saves GPC-compliant consent
     const postRes = await POST(

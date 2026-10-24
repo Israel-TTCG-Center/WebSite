@@ -11,7 +11,7 @@ import {
   Clock,
   Filter,
 } from "lucide-react";
-import type { StoreItem } from "@/lib/mongodb";
+import type { StoreItem } from "@/lib/store";
 import { useCart } from "@/context/CartContext";
 import { useLanguage } from "@/context/LanguageContext";
 import {

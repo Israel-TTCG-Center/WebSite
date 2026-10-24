@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { signInWithCredentials } from "./auth-helpers";
 
 test.describe("03. Orders Lifecycle (Customer Abort Before Packaged, Store Lifecycle & Cancel Before Completed), Cart & Account", () => {
   test("Customer Auth, Cart Checkout, User Abort Before Packaged, Store Lifecycle Progression & Store Cancel", async ({
@@ -11,12 +12,8 @@ test.describe("03. Orders Lifecycle (Customer Abort Before Packaged, Store Lifec
     await page.goto("/account");
     await expect(page).toHaveURL(/\/login/);
 
-    // One-Click Google Sign-In on /login
-    await expect(page.getByTestId("google-auth-email")).toHaveCount(0);
-    await page.getByTestId("google-auth-btn").click();
-    await expect(page).toHaveURL(/\/account/);
-    await expect(page.getByTestId("account-link")).toBeVisible();
-    await expect(page.getByTestId("linked-provider-google")).toBeVisible();
+    // Google sign-in needs a real Google account, so it is not exercised here
+    await expect(page.getByTestId("google-auth-btn")).toBeVisible();
 
     // 3B. Register a new account with Email + Password
     const testUserEmail = `player.${Date.now()}@docksidekeep.org`;
@@ -226,6 +223,23 @@ test.describe("03. Orders Lifecycle (Customer Abort Before Packaged, Store Lifec
     );
 
     // Race condition check on Terraforming Mars (quantity was 1, now 0)
+    // A registered account's email can only be used while signed in as that customer
+    const anonymousRaceRes = await request.post("/api/orders", {
+      data: {
+        items: [
+          { slug: "terraforming-mars", title: "Terraforming Mars", quantity: 1 },
+        ],
+        customer: { name: "Alex", email: testUserEmail },
+        paymentMethod: { type: "cash" },
+      },
+    });
+    expect(anonymousRaceRes.status()).toBe(401);
+    expect(
+      await signInWithCredentials(request, "customer", {
+        email: testUserEmail,
+        password: "SecurePass#2026",
+      })
+    ).toBe(true);
     const raceRes = await request.post("/api/orders", {
       data: {
         items: [
@@ -296,12 +310,12 @@ test.describe("03. Orders Lifecycle (Customer Abort Before Packaged, Store Lifec
   });
 
   test.afterAll(async ({ request }) => {
-    const loginRes = await request.post("/api/admin", {
-      data: { username: "admin", password: "dockside-admin-2026" },
+    const loggedIn = await signInWithCredentials(request, "admin", {
+      username: "admin",
+      password: "dockside-admin-2026",
     });
-    if (!loginRes.ok()) return;
-    const { adminToken } = await loginRes.json();
-    const headers = { "x-admin-token": adminToken };
+    if (!loggedIn) return;
+    const headers = {};
 
     const testItemSlugs = [
       "catan-strategy-board-game",

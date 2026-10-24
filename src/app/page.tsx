@@ -1,6 +1,6 @@
 import React, { Suspense } from "react";
 import type { Metadata } from "next";
-import { getStoreProducts } from "@/lib/mongodb";
+import { getStoreProducts } from "@/lib/store";
 import StorefrontClient from "@/components/StorefrontClient";
 import { buildPageMetadata } from "@/lib/seo";
 

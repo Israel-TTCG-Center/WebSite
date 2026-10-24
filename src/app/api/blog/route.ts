@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { getBlogPostBySlug, getDb, getPaginatedBlogPosts } from "@/lib/mongodb";
+import { getDb } from "@/lib/db";
+import { getBlogPostBySlug, getPaginatedBlogPosts } from "@/lib/store";
 import {
-  getAdminSessionFromRequest,
+  resolveAdminSessionFromRequest,
   hasAdminPrivilege,
   recordAdminAuditLog,
 } from "@/lib/admin";
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   // Only an Admin with 'blog' privilege is allowed to add blog posts!
-  const session = getAdminSessionFromRequest(request);
+  const session = await resolveAdminSessionFromRequest(request, await getDb());
   if (!session) {
     const db = await getDb();
     await recordErrorInvestigation(db, {
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const session = getAdminSessionFromRequest(request);
+  const session = await resolveAdminSessionFromRequest(request, await getDb());
   if (!session) {
     return NextResponse.json({ error: "Unauthorized admin" }, { status: 401 });
   }

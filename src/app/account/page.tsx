@@ -182,9 +182,7 @@ export default function AccountPage() {
     if (!user?.email) return;
     setExportingData(true);
     try {
-      const res = await fetch("/api/privacy", {
-        headers: { "x-user-email": user.email },
-      });
+      const res = await fetch("/api/privacy");
       if (res.ok) {
         const bundle = await res.json();
         const blob = new Blob([JSON.stringify(bundle, null, 2)], {
@@ -210,7 +208,6 @@ export default function AccountPage() {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
-        "x-user-email": user.email,
       },
       body: JSON.stringify({ email: user.email }),
     });
@@ -332,10 +329,7 @@ export default function AccountPage() {
       return;
     }
     const res = await fetch(
-      `/api/orders?email=${encodeURIComponent(user.email)}`,
-      {
-        headers: { "x-user-email": user.email },
-      }
+      `/api/orders?email=${encodeURIComponent(user.email)}`
     );
     if (res.ok) {
       const data = await res.json();
@@ -350,7 +344,6 @@ export default function AccountPage() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-user-email": user.email,
       },
       body: JSON.stringify({
         orderId,

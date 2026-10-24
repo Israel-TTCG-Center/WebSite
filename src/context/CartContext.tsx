@@ -1,7 +1,8 @@
 "use client";
 
+import { signOut, useSession } from "next-auth/react";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import type { StoreItem } from "@/lib/mongodb";
+import type { StoreItem } from "@/lib/store";
 import { type Money, normalizeMoney } from "@/lib/money";
 import { type Name, normalizeName } from "@/lib/name";
 import {
@@ -469,19 +470,52 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("docksidekeep-cart", JSON.stringify(next));
   };
 
+  const clearUserState = () => {
+    setUserState(null);
+    localStorage.removeItem("docksidekeep-user");
+    setContactEmailState("");
+    setNotificationsState(normalizeNotifications(null));
+    fetchLoyaltyForEmail("guest@local");
+  };
+
   const setUser = (nextUser: UserProfile | null) => {
-    setUserState(nextUser);
     if (nextUser) {
+      setUserState(nextUser);
       localStorage.setItem("docksidekeep-user", JSON.stringify(nextUser));
       applyUserToState(nextUser);
       fetchLoyaltyForEmail(nextUser.email);
     } else {
-      localStorage.removeItem("docksidekeep-user");
-      setContactEmailState("");
-      setNotificationsState(normalizeNotifications(null));
-      fetchLoyaltyForEmail("guest@local");
+      clearUserState();
+      // End the Auth.js session (cookie) as well
+      void signOut({ redirect: false });
     }
   };
+
+  // The Auth.js session is the source of truth: the profile in localStorage is only a cache.
+  const { data: authSession, status: authStatus } = useSession();
+  const sessionCustomerEmail =
+    authSession?.user?.kind === "customer"
+      ? authSession.user.email?.toLowerCase() || ""
+      : "";
+  useEffect(() => {
+    if (!authHydrated || authStatus === "loading") return;
+    if (!sessionCustomerEmail) {
+      if (user) clearUserState();
+      return;
+    }
+    if (user?.email?.toLowerCase() === sessionCustomerEmail) return;
+    let cancelled = false;
+    fetch("/api/auth")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.user) setUser(data.user as UserProfile);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authHydrated, authStatus, sessionCustomerEmail]);
 
   const setContactEmail = (email: string) => {
     setContactEmailState(email);

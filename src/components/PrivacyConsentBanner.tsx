@@ -94,7 +94,6 @@ export default function PrivacyConsentBanner() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(user?.email ? { "x-user-email": user.email } : {}),
         },
         body: JSON.stringify({
           email: user?.email,

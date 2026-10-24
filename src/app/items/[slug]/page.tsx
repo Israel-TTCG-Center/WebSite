@@ -1,7 +1,7 @@
 import React from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getItemBySlug } from "@/lib/mongodb";
+import { getItemBySlug } from "@/lib/store";
 import ItemDetailClient from "@/components/ItemDetailClient";
 import { buildProductJsonLd, buildProductMetadata } from "@/lib/seo";
 import { getEffectiveItemMoney } from "@/lib/premium";

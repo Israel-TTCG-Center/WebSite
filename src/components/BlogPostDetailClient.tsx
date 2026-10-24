@@ -3,7 +3,7 @@
 import React from "react";
 import { ArrowLeft, BookOpen, Calendar, User } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import type { StoredBlogPost } from "@/lib/mongodb";
+import type { StoredBlogPost } from "@/lib/store";
 import { AppLink } from "@/components/ui/app-link";
 import { Badge } from "@/components/ui/badge";
 import { LocalizedTime } from "@/components/ui/localized-time";

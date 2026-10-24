@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb, getPaginatedItems, normalizeDoc } from "@/lib/mongodb";
+import { getDb } from "@/lib/db";
+import { getPaginatedItems, normalizeDoc } from "@/lib/store";
 import { normalizeMoney } from "@/lib/money";
 import {
   hasAdminPrivilege,

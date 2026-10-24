@@ -1,5 +1,4 @@
-import { MongoClient, Db, ObjectId } from "mongodb";
-import { hashPasswordScrypt, isScryptHash } from "@/lib/auth-security";
+import { getDb, type Db } from "@/lib/db";
 import { type Money, normalizeMoney } from "@/lib/money";
 import { emitOtelLog, incrementOtelCounter } from "@/lib/otel";
 import {
@@ -141,157 +140,6 @@ export function normalizeDoc(doc: Record<string, any>): StoreItem {
   } as StoreItem;
 }
 
-let cachedClient: MongoClient | null = null;
-let cachedDb: Db | null = null;
-let initialized = false;
-
-export async function getDb(): Promise<Db | null> {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) return null;
-
-  if (cachedDb && cachedClient) {
-    return cachedDb;
-  }
-
-  try {
-    const client = new MongoClient(uri, {
-      serverSelectionTimeoutMS: 2500,
-      connectTimeoutMS: 2500,
-    });
-    await client.connect();
-    const db = client.db();
-    cachedClient = client;
-    cachedDb = db;
-
-    if (!initialized) {
-      initialized = true;
-      const nowUtc = nowUtcIso();
-
-      await ensureDbIndexes(db);
-      startOrderTtlChangeStream(db);
-
-      // Ensure store products ("items" collection) and events ("events" collection) are strictly separated.
-      // Migrate any legacy event documents out of "items" into "events".
-      try {
-        const legacyEventsInItems = await db
-          .collection("items")
-          .find({
-            $or: [
-              { kind: "event" },
-              { type: "ticket" },
-              { category: "Event Tickets" },
-            ],
-          })
-          .toArray();
-        for (const evDoc of legacyEventsInItems) {
-          const { _id, ...rest } = evDoc;
-          await db
-            .collection("events")
-            .updateOne(
-              { slug: evDoc.slug },
-              { $set: { ...rest, kind: "event", type: "ticket", category: "Event Tickets" } },
-              { upsert: true }
-            );
-          await db.collection("items").deleteOne({ _id });
-        }
-      } catch {
-        // Ignore migration errors on empty collections
-      }
-
-      // IMPORTANT: Never delete or wipe any DB collections on startup or update,
-      // and never fill dummy/mock/initial items, events, or classes into the database!
-      // Only ensure the root owner admin account exists via Auth0 delegation.
-      const adminsCol = db.collection("admins");
-      const defaultAdminUser = process.env.ADMIN_USERNAME || "admin";
-      const defaultAdminPass =
-        process.env.ADMIN_PASSWORD || "dockside-admin-2026";
-      const existingRootAdmin = await adminsCol.findOne({
-        username: defaultAdminUser,
-      });
-      const rootVerifier =
-        existingRootAdmin?.passwordHash &&
-        isScryptHash(existingRootAdmin.passwordHash)
-          ? existingRootAdmin.passwordHash
-          : hashPasswordScrypt(
-              existingRootAdmin?.password || defaultAdminPass
-            );
-      await adminsCol.updateOne(
-        { username: defaultAdminUser },
-        {
-          $set: {
-            role: "owner",
-            level: 100,
-            authProvider: "auth0",
-            auth0Sub: `auth0|admin|${defaultAdminUser}`,
-            passwordHash: rootVerifier,
-            privileges: [
-              "inventory",
-              "events",
-              "metadata",
-              "blog",
-              "manage_admins",
-            ],
-          },
-          $unset: {
-            password: "",
-          },
-          $setOnInsert: {
-            username: defaultAdminUser,
-            createdAtUtc: nowUtc,
-          },
-        },
-        { upsert: true }
-      );
-    }
-
-    return db;
-  } catch {
-    return null;
-  }
-}
-
-export async function ensureDbIndexes(db: Db): Promise<void> {
-  try {
-    await Promise.all([
-      db.collection("items").createIndex({ slug: 1 }, { unique: true }),
-      db
-        .collection("items")
-        .createIndex({ inStock: 1, quantity: 1, createdAtUtc: -1 }),
-      db.collection("items").createIndex({ category: 1, createdAtUtc: -1 }),
-      db.collection("items").createIndex({ "money.price": 1 }),
-      db.collection("events").createIndex({ slug: 1 }, { unique: true }),
-      db
-        .collection("events")
-        .createIndex({ inStock: 1, quantity: 1, createdAtUtc: -1 }),
-      db.collection("events").createIndex({ "money.price": 1 }),
-      db.collection("blog_posts").createIndex({ slug: 1 }, { unique: true }),
-      db.collection("blog_posts").createIndex({ createdAtUtc: -1 }),
-      db.collection("users").createIndex({ email: 1 }, { unique: true }),
-      db.collection("admins").createIndex({ username: 1 }, { unique: true }),
-      db.collection("orders").createIndex({ status: 1, expiresAtUtc: 1 }),
-      db
-        .collection("order_ttl_holds")
-        .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-      db
-        .collection("geocode_cache")
-        .createIndex({ cacheKey: 1 }, { unique: true }),
-      db
-        .collection("geocode_cache")
-        .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    ]);
-    try {
-      await db.command({
-        collMod: "order_ttl_holds",
-        changeStreamPreAndPostImages: { enabled: true },
-      });
-    } catch {
-      // Ignore collMod errors if collection does not exist yet or topology does not support pre-images
-    }
-  } catch {
-    // Ignore duplicate index errors on existing collections
-  }
-}
-
 export interface OrderTtlDeletionEvent {
   operationType?: string;
   documentKey?: { _id?: any };
@@ -303,8 +151,8 @@ export interface OrderTtlDeletionEvent {
 }
 
 /**
- * MongoDB "Capturing TTL Deletion Events" handler:
- * Invoked when the TTL index on `order_ttl_holds` deletes an expired 3-day reservation hold document.
+ * Expired-hold handler: invoked by `sweepExpiredOrderHolds` for each expired 3-day reservation hold
+ * in `order_ttl_holds` (the hold row is deleted by the sweep).
  * Preserves the historical order in `orders` by transitioning it from `ordered-not-paid` to `cancelled`
  * (`cancelledReason: "ttl-expired-3-days"`) and restoring held stock to `items` and `events`.
  */
@@ -319,9 +167,7 @@ export async function handleOrderTtlDeletionEvent(
   }
 
   const orderIdStr = String(rawId);
-  const query = ObjectId.isValid(orderIdStr)
-    ? { _id: new ObjectId(orderIdStr) }
-    : ({ _id: rawId } as any);
+  const query = { _id: orderIdStr };
 
   const existingOrder = await db.collection("orders").findOne(query);
   if (!existingOrder) {
@@ -404,30 +250,41 @@ export async function handleOrderTtlDeletionEvent(
   };
 }
 
-let orderTtlChangeStreamStarted = false;
+const HOLD_SWEEP_INTERVAL_MS = 60_000;
+let lastHoldSweepMs = 0;
 
-export function startOrderTtlChangeStream(db: Db): void {
-  if (orderTtlChangeStreamStarted) return;
+/**
+ * Deletes expired `order_ttl_holds` rows and cancels their unpaid orders (restoring stock).
+ * Postgres has no TTL indexes, so this replaces the former MongoDB TTL index + change stream.
+ */
+export async function sweepExpiredOrderHolds(db: Db): Promise<number> {
+  const expired = await db
+    .collection("order_ttl_holds")
+    .find({ expiresAt: { $lte: new Date().toISOString() } })
+    .limit(100)
+    .toArray();
+  let handled = 0;
+  for (const hold of expired) {
+    const result = await handleOrderTtlDeletionEvent(db, {
+      operationType: "delete",
+      documentKey: { _id: hold.orderId ?? hold._id },
+      fullDocumentBeforeChange: hold as OrderTtlDeletionEvent["fullDocumentBeforeChange"],
+    });
+    await db.collection("order_ttl_holds").deleteOne({ _id: hold._id });
+    if (result.handled) handled += 1;
+  }
+  return handled;
+}
+
+/** Throttled sweep, safe to call on every request. */
+export async function maybeSweepExpiredHolds(db: Db): Promise<void> {
+  const now = Date.now();
+  if (now - lastHoldSweepMs < HOLD_SWEEP_INTERVAL_MS) return;
+  lastHoldSweepMs = now;
   try {
-    const holdsCol = db.collection("order_ttl_holds");
-    if (typeof holdsCol.watch !== "function") return;
-    const changeStream = holdsCol.watch(
-      [{ $match: { operationType: "delete" } }],
-      { fullDocumentBeforeChange: "whenAvailable" }
-    );
-    orderTtlChangeStreamStarted = true;
-    changeStream.on("change", (changeEvent: any) => {
-      handleOrderTtlDeletionEvent(db, changeEvent).catch(() => {
-        // Ignore individual event processing errors
-      });
-    });
-    changeStream.on("error", () => {
-      // Gracefully ignore change stream errors on standalone non-replica-set MongoDB instances
-      orderTtlChangeStreamStarted = false;
-      changeStream.close().catch(() => {});
-    });
+    await sweepExpiredOrderHolds(db);
   } catch {
-    // Standalone MongoDB instances without replica sets do not support Change Streams
+    // Sweeping is best-effort; the next request retries.
   }
 }
 

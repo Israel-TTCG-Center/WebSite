@@ -11,7 +11,7 @@ import {
   PackageCheck,
 } from "lucide-react";
 import { Facebook } from "@/components/ui/brand-icons";
-import type { StoreItem } from "@/lib/mongodb";
+import type { StoreItem } from "@/lib/store";
 import { useCart } from "@/context/CartContext";
 import { useLanguage } from "@/context/LanguageContext";
 import {

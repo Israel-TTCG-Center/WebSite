@@ -1,5 +1,5 @@
 import React from "react";
-import { getEventTickets } from "@/lib/mongodb";
+import { getEventTickets } from "@/lib/store";
 import EventsClient from "@/components/EventsClient";
 import { buildEventJsonLd } from "@/lib/seo";
 

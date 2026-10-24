@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { getDb, getPremiumClassesFromDb } from "@/lib/mongodb";
+import { getDb } from "@/lib/db";
+import { getPremiumClassesFromDb } from "@/lib/store";
 import {
   hasAdminPrivilege,
   recordAdminAuditLog,
   resolveAdminSessionFromRequest,
+  resolveCustomerUserFromRequest,
 } from "@/lib/admin";
 import {
   calculateLoyaltyStatus,
@@ -13,7 +15,7 @@ import {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const email = searchParams.get("email") || "guest@local";
+  const requestedEmail = searchParams.get("email") || "guest@local";
 
   const db = await getDb();
   const classes = await getPremiumClassesFromDb();
@@ -25,6 +27,13 @@ export async function GET(request: Request) {
 
   const session = await resolveAdminSessionFromRequest(request, db);
   const isAdmin = Boolean(session);
+  // Admins may look up any email; customers only see their own loyalty status.
+  const sessionCustomer = isAdmin
+    ? null
+    : await resolveCustomerUserFromRequest(request, db);
+  const email = isAdmin
+    ? requestedEmail
+    : sessionCustomer?.email || "guest@local";
 
   const userDoc = await db.collection("users").findOne({ email });
   const assignedClassId = userDoc?.assignedClassId || null;

@@ -7,7 +7,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { formatMoney } from "@/lib/money";
 import { getEffectiveItemMoney, getItemSaleStage } from "@/lib/premium";
 import { Button } from "@/components/ui/button";
-import type { StoreItem } from "@/lib/mongodb";
+import type { StoreItem } from "@/lib/store";
 
 export default function AddToCartButton({ item }: { item: StoreItem }) {
   const { addToCart } = useCart();

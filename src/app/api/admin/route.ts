@@ -1,25 +1,20 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
+import { getDb } from "@/lib/db";
 import {
   buildAdminSession,
-  createAdminToken,
   getAdminAuditLogs,
-  getAdminSessionFromRequest,
+  resolveAdminSessionFromRequest,
   hasAdminPrivilege,
   normalizeAdminPrivileges,
   normalizeAdminRole,
   recordAdminAuditLog,
   ROLE_LEVELS,
 } from "@/lib/admin";
-import {
-  hashPasswordScrypt,
-  isScryptHash,
-  verifyAuth0AdminIdentity,
-} from "@/lib/auth-security";
+import { hashPasswordScrypt } from "@/lib/auth-security";
 import { nowUtcIso } from "@/lib/premium";
 
 export async function GET(request: Request) {
-  const session = getAdminSessionFromRequest(request);
+  const session = await resolveAdminSessionFromRequest(request, await getDb());
   if (!session) {
     return NextResponse.json({ error: "Unauthorized admin" }, { status: 401 });
   }
@@ -67,113 +62,8 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST(request: Request) {
-  const body = await request.json();
-  const { username, password, mode, auth0Token } = body;
-
-  const db = await getDb();
-  const expectedUser = process.env.ADMIN_USERNAME || "admin";
-  const expectedPass = process.env.ADMIN_PASSWORD || "dockside-admin-2026";
-
-  // Auth0 SSO login for Admin Portal
-  if (mode === "auth0-sso" || auth0Token) {
-    const targetAdminUser = String(username || expectedUser).trim();
-    const ssoIdentity = verifyAuth0AdminIdentity({
-      username: targetAdminUser,
-      auth0Token: String(auth0Token || "auth0-admin-sso-session"),
-    });
-    if (ssoIdentity.verified) {
-      const adminDoc = db
-        ? await db.collection("admins").findOne({ username: targetAdminUser })
-        : null;
-      const session = buildAdminSession({
-        username: adminDoc?.username || targetAdminUser,
-        role: adminDoc?.role || (targetAdminUser === expectedUser ? "owner" : "support"),
-        privileges: adminDoc?.privileges,
-      });
-      const adminToken = createAdminToken(session);
-      return NextResponse.json({
-        ok: true,
-        admin: session,
-        authProvider: ssoIdentity.authProvider,
-        auth0Sub: ssoIdentity.auth0Sub,
-        adminToken,
-      });
-    }
-  }
-
-  if (!username || !password) {
-    return NextResponse.json(
-      { error: "Admin username and password are required" },
-      { status: 400 }
-    );
-  }
-
-  if (db) {
-    const adminDoc = await db.collection("admins").findOne({ username });
-    if (adminDoc) {
-      const storedVerifier = adminDoc.passwordHash || adminDoc.password;
-      const auth0Check = verifyAuth0AdminIdentity({
-        username: adminDoc.username,
-        password,
-        storedVerifier,
-      });
-
-      if (auth0Check.verified) {
-        // Transparently migrate any legacy plaintext password to salted Auth0 verifier and remove plaintext
-        if (adminDoc.password || !isScryptHash(adminDoc.passwordHash)) {
-          await db.collection("admins").updateOne(
-            { username: adminDoc.username },
-            {
-              $set: {
-                authProvider: "auth0",
-                auth0Sub: auth0Check.auth0Sub,
-                passwordHash: hashPasswordScrypt(password),
-                updatedAtUtc: nowUtcIso(),
-              },
-              $unset: { password: "" },
-            }
-          );
-        }
-
-        const session = buildAdminSession({
-          username: adminDoc.username,
-          role: adminDoc.role,
-          privileges: adminDoc.privileges,
-        });
-        const adminToken = createAdminToken(session);
-        return NextResponse.json({
-          ok: true,
-          admin: session,
-          authProvider: "auth0",
-          auth0Sub: auth0Check.auth0Sub,
-          adminToken,
-        });
-      }
-    }
-  } else if (username === expectedUser && password === expectedPass) {
-    const session = buildAdminSession({
-      username: expectedUser,
-      role: "owner",
-    });
-    const adminToken = createAdminToken(session);
-    return NextResponse.json({
-      ok: true,
-      admin: session,
-      authProvider: "auth0",
-      auth0Sub: `auth0|admin|${expectedUser}`,
-      adminToken,
-    });
-  }
-
-  return NextResponse.json(
-    { error: "Invalid admin credentials" },
-    { status: 401 }
-  );
-}
-
 export async function PUT(request: Request) {
-  const session = getAdminSessionFromRequest(request);
+  const session = await resolveAdminSessionFromRequest(request, await getDb());
   if (!session) {
     return NextResponse.json({ error: "Unauthorized admin" }, { status: 401 });
   }
@@ -281,7 +171,7 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const session = getAdminSessionFromRequest(request);
+  const session = await resolveAdminSessionFromRequest(request, await getDb());
   if (!session) {
     return NextResponse.json({ error: "Unauthorized admin" }, { status: 401 });
   }

@@ -139,7 +139,7 @@ describe("Controllable Supported Countries & Geoapify Autocomplete", () => {
     expect(streetRes.result.streets?.map((s) => s.street)).toContain("Hertz");
   });
 
-  it("caches Geoapify lookup responses in memory and in MongoDB geocode_cache with 7-day TTL", async () => {
+  it("caches Geoapify lookup responses in memory and in Postgres geocode_cache with 7-day TTL", async () => {
     const storedDocs = new Map<string, any>();
     const fakeDb: any = {
       collection: (name: string) => {

@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// No signed-in session: every request is anonymous.
+vi.mock("@/auth", () => ({ auth: async () => null }));
 import fs from "node:fs";
 import path from "node:path";
-import { buildItemsDbFilter } from "@/lib/mongodb";
+import { buildItemsDbFilter } from "@/lib/store";
 import { GET as getItems, POST as postItems } from "@/app/api/items/route";
 import { GET as getEvents, POST as postEvents } from "@/app/api/events/route";
 import { GET as getOrders, PATCH as patchOrders } from "@/app/api/orders/route";
@@ -39,20 +42,23 @@ describe("Separated items & events Collections, DB Filter Builder & API Route Se
     expect(JSON.stringify(eventFilter)).toContain('"kind":"event"');
   });
 
-  it("enforces separate items and events collections in src/lib/mongodb.ts and API routes", () => {
+  it("enforces separate items and events collections in src/lib/store.ts and API routes", () => {
     const rootDir = process.cwd();
     const readRel = (relPath: string) =>
       fs.readFileSync(path.join(rootDir, relPath), "utf8");
 
-    const mongoSrc = readRel("src/lib/mongodb.ts");
-    expect(mongoSrc).not.toContain("DEFAULT_PREMIUM_CLASSES");
-    expect(mongoSrc).toContain("ensureDbIndexes");
-    expect(mongoSrc).toContain('db.collection("items")');
-    expect(mongoSrc).toContain('db.collection("events")');
-    expect(mongoSrc).toContain("getPaginatedItems");
-    expect(mongoSrc).toContain("getPaginatedEvents");
-    expect(mongoSrc).toContain("getEventBySlug");
-    expect(mongoSrc).toContain("getPaginatedBlogPosts");
+    const storeSrc = readRel("src/lib/store.ts");
+    expect(storeSrc).not.toContain("DEFAULT_PREMIUM_CLASSES");
+    const migrationSql = readRel("supabase/migrations/0001_init.sql");
+    expect(migrationSql).toContain("'items', 'events'");
+    expect(migrationSql).toContain("items_slug_key");
+    expect(migrationSql).toContain("events_slug_key");
+    expect(storeSrc).toContain('db.collection("items")');
+    expect(storeSrc).toContain('db.collection("events")');
+    expect(storeSrc).toContain("getPaginatedItems");
+    expect(storeSrc).toContain("getPaginatedEvents");
+    expect(storeSrc).toContain("getEventBySlug");
+    expect(storeSrc).toContain("getPaginatedBlogPosts");
 
     // Verify API routes never trust ?admin=1 in the URL
     const itemsRouteSrc = readRel("src/app/api/items/route.ts");

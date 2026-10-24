@@ -1,7 +1,7 @@
 import React from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getBlogPostBySlug } from "@/lib/mongodb";
+import { getBlogPostBySlug } from "@/lib/store";
 import BlogPostDetailClient from "@/components/BlogPostDetailClient";
 import { buildBlogPostingJsonLd, buildBlogPostMetadata } from "@/lib/seo";
 import { SeoJsonLd } from "@/components/ui/seo-json-ld";

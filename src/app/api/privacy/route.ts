@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
+import { getDb } from "@/lib/db";
 import { resolveCustomerUserFromRequest } from "@/lib/admin";
 import { normalizeOrderStatus, nowUtcIso } from "@/lib/premium";
 import {
@@ -84,11 +84,7 @@ export async function POST(request: Request) {
 
   const db = await getDb();
   if (db) {
-    const customerUser = await resolveCustomerUserFromRequest(
-      request,
-      db,
-      body.email
-    );
+    const customerUser = await resolveCustomerUserFromRequest(request, db);
     if (customerUser) {
       await Promise.all([
         db.collection("users").updateOne(
@@ -130,11 +126,7 @@ export async function DELETE(request: Request) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const customerUser = await resolveCustomerUserFromRequest(
-    request,
-    db,
-    body.email
-  );
+  const customerUser = await resolveCustomerUserFromRequest(request, db);
   if (!customerUser) {
     return NextResponse.json(
       {
@@ -186,7 +178,7 @@ export async function DELETE(request: Request) {
           );
         }
       }
-      await db.collection("order_ttl_holds").deleteOne({ _id: ord._id });
+      await db.collection("order_ttl_holds").deleteOne({ orderId: String(ord._id) });
     }
 
     const anonymized = anonymizeOrderForGdprErasure(
@@ -199,7 +191,7 @@ export async function DELETE(request: Request) {
       },
       nowUtc
     );
-    const { _id, ...fieldsToSet } = anonymized;
+    const { _id, ...fieldsToSet } = anonymized as Record<string, any>;
     await ordersCol.updateOne({ _id: ord._id }, { $set: fieldsToSet });
     anonymizedOrdersCount += 1;
   }
